@@ -10,16 +10,24 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /**
- * Sequential HTTP server. Accepts one connection at a time, parses the
- * request line, and delegates to the Router for dynamic routes or to the
- * StaticFileService as a fallback. No concurrency mechanism is used.
+ * Concurrent HTTP server. Each accepted connection is handled on a
+ * separate worker thread from a fixed-size thread pool, so multiple
+ * clients can be served at the same time. Shutdown remains graceful: the
+ * listening socket is closed first (no new connections accepted), and the
+ * thread pool is given time to finish in-flight requests before exiting.
  */
 public class HttpServer {
 
+    private static final int THREAD_POOL_SIZE = 20;
+
     private final Router router;
     private final StaticFileService staticFileService;
+    private final ExecutorService workerPool = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
     private volatile boolean running = false;
     private ServerSocket serverSocket;
 
@@ -32,33 +40,25 @@ public class HttpServer {
         running = true;
         try (ServerSocket socket = new ServerSocket(port)) {
             this.serverSocket = socket;
-            System.out.println("Server listening on port " + port + "...");
+            System.out.println("Server listening on port " + port
+                    + " with a pool of " + THREAD_POOL_SIZE + " worker threads...");
 
             while (running) {
-                Socket clientSocket = null;
                 try {
-                    clientSocket = socket.accept();
-                    handleClient(clientSocket);
+                    Socket clientSocket = socket.accept();
+                    workerPool.submit(() -> handleClientSafely(clientSocket));
                 } catch (IOException e) {
                     if (running) {
-                        System.err.println("Error handling client: " + e.getMessage());
+                        System.err.println("Error accepting connection: " + e.getMessage());
                     }
-                    // If !running, this IOException is expected: it comes
-                    // from closing the ServerSocket during shutdown.
-                } finally {
-                    closeQuietly(clientSocket);
                 }
             }
         }
+
+        shutdownWorkerPool();
         System.out.println("Server stopped gracefully.");
     }
 
-    /**
-     * Marks the server as no longer running and closes the listening
-     * socket so the blocking accept() call unblocks and the loop exits.
-     * This is called AFTER the current response has already been sent
-     * (see handleClient), so the current request finishes normally.
-     */
     public void stop() {
         running = false;
         try {
@@ -66,7 +66,28 @@ public class HttpServer {
                 serverSocket.close();
             }
         } catch (IOException ignored) {
-            // Nothing more we can do; the loop will exit on the next check.
+        }
+    }
+
+    private void shutdownWorkerPool() {
+        workerPool.shutdown();
+        try {
+            if (!workerPool.awaitTermination(10, TimeUnit.SECONDS)) {
+                workerPool.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            workerPool.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private void handleClientSafely(Socket clientSocket) {
+        try {
+            handleClient(clientSocket);
+        } catch (IOException e) {
+            System.err.println("Error handling client: " + e.getMessage());
+        } finally {
+            closeQuietly(clientSocket);
         }
     }
 
@@ -84,7 +105,7 @@ public class HttpServer {
         if (requestLine == null || requestLine.isBlank()) {
             return;
         }
-        System.out.println("Request line: " + requestLine);
+        System.out.println("[" + Thread.currentThread().getName() + "] Request line: " + requestLine);
 
         String[] parts = requestLine.split(" ");
         if (parts.length < 2) {
@@ -106,7 +127,6 @@ public class HttpServer {
         String decodedPath = URLDecoder.decode(pathOnly, StandardCharsets.UTF_8);
         Map<String, String> queryParams = parseQuery(rawPath);
 
-        // 1. Try a registered dynamic route first.
         Route route = router.resolve(decodedPath);
         if (route != null) {
             Request request = new Request(decodedPath, queryParams);
@@ -124,7 +144,6 @@ public class HttpServer {
             return;
         }
 
-        // 2. Fall back to static resources.
         String staticPath = decodedPath.equals("/") ? "/index.html" : decodedPath;
         if (staticFileService.canServe(staticPath)) {
             try {
@@ -142,7 +161,6 @@ public class HttpServer {
             return;
         }
 
-        // 3. Neither a dynamic route nor a servable static file.
         sendError(out, 404, "Not Found");
     }
 
@@ -185,7 +203,6 @@ public class HttpServer {
             try {
                 socket.close();
             } catch (IOException ignored) {
-                // Nothing more we can do.
             }
         }
     }

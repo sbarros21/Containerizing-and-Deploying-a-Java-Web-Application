@@ -35,6 +35,16 @@ public class Application {
             });
         }
 
+        get("/slow", (req, resp) -> {
+            try {
+                Thread.sleep(5000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return "Slow response after 5 seconds, handled by "
+                    + Thread.currentThread().getName();
+        });
+
         start();
     }
 }
