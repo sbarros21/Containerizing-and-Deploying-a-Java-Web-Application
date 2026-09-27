@@ -250,8 +250,7 @@ http://44.200.247.221:8080
 A short video demonstrating the local Docker deployment and the EC2
 deployment working is included/linked here:
 
-<!-- Reemplaza con el link real una vez grabado y subido -->
-`<LINK_AL_VIDEO>`
+https://www.youtube.com/watch?v=vLmHjgEIuXs
 
 The video shows:
 - The container running locally (`docker ps`, the app responding in the
