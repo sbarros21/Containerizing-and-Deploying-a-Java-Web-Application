@@ -182,6 +182,7 @@ docker pull sbarros2121/webframework-extension:1.0
 ![dockerPi.png](docs/evidence/dockerPi.png)
 ![dockerPsAndLogs.png](docs/evidence/dockerPsAndLogs.png)
 ![helloDocker.png](docs/evidence/helloDocker.png)
+![img.png](docs/evidence/docker1.png)
 
 **Evidence — Docker Hub publication:**
 
@@ -242,6 +243,7 @@ http://44.200.247.221:8080
 
 ![EC2Pi.png](docs/evidence/EC2Pi.png)
 ![EC2Hello.png](docs/evidence/EC2Hello.png)
+![img.png](docs/evidence/EC2.png)
 
 ---
 
